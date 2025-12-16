@@ -1,15 +1,29 @@
-# week1_stock_linear_regression_auto.py
-
 import pandas as pd
 import numpy as np
 import os
-import glob
-from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.preprocessing import StandardScaler
+from data_loader import load_stock, get_features_targets, train_val_test_split_time_series
+import joblib
 
-# List of 50 stock symbols
+# ---- Set Project Root ----
+BASE_DIR = os.path.abspath(os.path.join(os.getcwd(), ".."))  # Go up one level from scripts/
+print("Project root:", BASE_DIR)
+
+# ---- Folder Setup ----
+predictions_folder = os.path.join(BASE_DIR, "data/predictions/LR_predictions")
+plots_folder = os.path.join(BASE_DIR, "plots/LR_plots")    # LR_plots subfolder
+models_folder = os.path.join(BASE_DIR, "models/LR_models")
+
+# Create folders if they don't exist
+for folder in [predictions_folder, plots_folder, models_folder]:
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+        print(f"Created folder: {folder}")
+
+# ---- Stock List ----
 stocks = [
     "AAPL","MSFT","GOOGL","AMZN","TSLA","META","NVDA","JPM","V","UNH",
     "HD","PG","DIS","MA","BAC","NFLX","ADBE","PYPL","CMCSA","XOM",
@@ -18,87 +32,101 @@ stocks = [
     "QCOM","TXN","NEE","COST","TMUS","IBM","SBUX","MDT","HON","AMD"
 ]
 
-# Folders
-processed_folder = "../data/processed"
-predictions_folder = "../data/predictions"
-plots_folder = "../plots/linear_regression_auto"
-os.makedirs(predictions_folder, exist_ok=True)
-os.makedirs(plots_folder, exist_ok=True)
-
 processed_stocks = []
 skipped_stocks = []
 
+# ---- Main Loop ----
 for symbol in stocks:
     print(f"\n--- Processing {symbol} ---")
-    
-    # Find latest processed CSV for the symbol
-    files = glob.glob(f"{processed_folder}/{symbol}_processed*.csv")
-    if files:
-        processed_file = sorted(files)[-1]  # pick the latest file
-    else:
-        print(f"Processed file for {symbol} not found. Skipping.")
-        skipped_stocks.append(symbol)
-        continue
-    
-    # Load processed data
-    data = pd.read_csv(processed_file, index_col=0, parse_dates=True)
-    
-    # Ensure Close column exists
-    if 'Close' not in data.columns or data['Close'].isna().all():
-        print(f"No valid Close data for {symbol}. Skipping.")
-        skipped_stocks.append(symbol)
-        continue
-    
-    # Prepare target: next day Close
-    data['Close_next'] = data['Close'].shift(-1)
-    data.dropna(inplace=True)
-    
-    # Features selection
-    feature_cols = ['Close']
-    for col in ['MA_20', 'Volatility', 'Volume']:
-        if col in data.columns:
-            feature_cols.append(col)
-    
-    X = data[feature_cols]
-    y = data['Close_next']
-    
-    # Split data (80% train, 20% test, no shuffle for time series)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-    
-    # Train Linear Regression
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    
-    # Predict
-    y_pred = model.predict(X_test)
-    
-    # Evaluate
-    mse = mean_squared_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    print(f"{symbol} MSE: {mse:.4f}, R²: {r2:.4f}")
-    
-    # Save predictions
-    predictions = pd.DataFrame({
-        'Actual_Close': y_test,
-        'Predicted_Close': y_pred
-    })
-    predictions_file = os.path.join(predictions_folder, f"{symbol}_predictions.csv")
-    predictions.to_csv(predictions_file)
-    
-    # Plot
-    plt.figure(figsize=(12,6))
-    plt.plot(predictions.index, predictions['Actual_Close'], label="Actual Close")
-    plt.plot(predictions.index, predictions['Predicted_Close'], linestyle='--', label="Predicted Close")
-    plt.title(f"{symbol} Linear Regression: Actual vs Predicted Close (Multi-feature)")
-    plt.xlabel("Date")
-    plt.ylabel("Price")
-    plt.legend()
-    plot_file = os.path.join(plots_folder, f"{symbol}_lr_plot.png")
-    plt.savefig(plot_file)
-    plt.close()
-    
-    processed_stocks.append(symbol)
 
-print("\nLinear Regression (multi-feature) processing complete.")
+    try:
+        df = load_stock(symbol)
+        if df is None:
+            print(f"{symbol}: processed CSV not found. Skipping.")
+            skipped_stocks.append(symbol)
+            continue
+
+        # Features
+        feature_cols = ['Close', 'MA_20', 'Volatility', 'Volume']
+        df_cols = [col for col in feature_cols if col in df.columns]
+
+        if len(df_cols) == 0:
+            print(f"{symbol}: no valid features. Skipping.")
+            skipped_stocks.append(symbol)
+            continue
+
+        X, y = get_features_targets(df, features=df_cols)
+
+        # Split
+        X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split_time_series(X, y)
+
+        # Scaling
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_val = scaler.transform(X_val)
+        X_test = scaler.transform(X_test)
+
+        # Model
+        model = LinearRegression()
+        model.fit(X_train, y_train)
+
+        # Prediction
+        y_pred = model.predict(X_test)
+
+        # Metrics
+        y_test_safe = np.where(y_test == 0, 1e-8, y_test)  # Avoid division by zero
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = np.sqrt(mse)
+        mape = np.mean(np.abs((y_test - y_pred) / y_test_safe)) * 100
+        r2 = r2_score(y_test, y_pred)
+
+        print(f"{symbol} | RMSE: {rmse:.4f}, MAPE: {mape:.2f}%, R²: {r2:.4f}")
+
+        # Predictions DataFrame
+        predictions_df = pd.DataFrame({
+            'Date': df.index[-len(y_test):],
+            'Actual_Close': y_test,
+            'Predicted_Close': y_pred
+        })
+        predictions_path = os.path.join(predictions_folder, f"{symbol}_predictions.csv")
+        predictions_df.to_csv(predictions_path, index=False)
+
+        # Metrics CSV
+        metrics_df = pd.DataFrame([{
+            'Symbol': symbol,
+            'MSE': mse,
+            'RMSE': rmse,
+            'MAPE': mape,
+            'R2': r2
+        }])
+        metrics_path = os.path.join(predictions_folder, f"{symbol}_metrics.csv")
+        metrics_df.to_csv(metrics_path, index=False)
+
+        # Save Model + Scaler
+        model_path = os.path.join(models_folder, f"{symbol}_lr.pkl")
+        scaler_path = os.path.join(models_folder, f"{symbol}_scaler.pkl")
+        joblib.dump(model, model_path)
+        joblib.dump(scaler, scaler_path)
+
+        # Plot
+        plt.figure(figsize=(12, 6))
+        plt.plot(predictions_df['Date'], predictions_df['Actual_Close'], label='Actual')
+        plt.plot(predictions_df['Date'], predictions_df['Predicted_Close'], linestyle='--', label='Predicted')
+        plt.title(f"{symbol} Linear Regression: Actual vs Predicted")
+        plt.xlabel("Date")
+        plt.ylabel("Price")
+        plt.legend()
+        plot_path = os.path.join(plots_folder, f"{symbol}_lr_plot.png")
+        plt.savefig(plot_path)
+        plt.close()
+
+        processed_stocks.append(symbol)
+
+    except Exception as e:
+        print(f"{symbol}: ERROR → {e}")
+        skipped_stocks.append(symbol)
+        continue
+
+print("\nLinear Regression processing complete.")
 print("Processed stocks:", processed_stocks)
 print("Skipped stocks:", skipped_stocks)
