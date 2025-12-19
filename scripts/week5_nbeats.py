@@ -25,8 +25,10 @@ os.makedirs(models_folder, exist_ok=True)
 # STOCK LIST
 # ============================
 stocks = [
-    "AAPL","MSFT","GOOGL","AMZN","TSLA",
-    "META","NVDA","JPM","V","UNH",
+    "HD","PG","DIS","MA","BAC","NFLX","ADBE","PYPL","CMCSA","XOM",
+    "PFE","KO","INTC","CSCO","NKE","MRK","PEP","ABBV","ABT","CRM",
+    "ORCL","T","VZ","CVX","MCD","WMT","DHR","ACN","LLY","AVGO",
+    "QCOM","TXN","NEE","COST","TMUS","IBM","SBUX","MDT","HON","AMD"
     # add all 50 stocks here
 ]
 
