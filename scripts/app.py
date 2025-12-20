@@ -22,7 +22,7 @@ PRED_BASE = os.path.join(BASE_DIR, "data", "predictions")
 RAW_BASE = os.path.join(BASE_DIR, "data", "raw")
 PLOT_BASE = os.path.join(BASE_DIR, "plots")
 
-MODEL_LIST = ["LR", "LSTM", "GRU", "NBEATS", "TFT", "SVR", "PROPHET", "GRU", "RIDGE"]
+MODEL_LIST = ["LR", "RIDGE", "SVR", "PROPHET", "LSTM", "GRU", "NBEATS", "TFT"]
 
 # =========================
 # UTILITY FUNCTIONS
